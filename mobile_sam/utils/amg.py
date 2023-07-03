@@ -76,16 +76,28 @@ class MaskData:
 
 
 def is_box_near_crop_edge(
-    boxes: torch.Tensor, crop_box: List[int], orig_box: List[int], atol: float = 20.0
+    boxes: torch.Tensor,
+    crop_box: List[int],
+    orig_box: List[int],
+    atol: float = 20.0,
+    ignore_image_edge=True,
 ) -> torch.Tensor:
-    """Filter masks at the edge of a crop, but not at the edge of the original image."""
+    """
+    Filter masks at the edge of a crop.
+    If ignore_image_edge is True, this function returns False at the edge of the original image.
+    """
     crop_box_torch = torch.as_tensor(crop_box, dtype=torch.float, device=boxes.device)
     orig_box_torch = torch.as_tensor(orig_box, dtype=torch.float, device=boxes.device)
     boxes = uncrop_boxes_xyxy(boxes, crop_box).float()
     near_crop_edge = torch.isclose(boxes, crop_box_torch[None, :], atol=atol, rtol=0)
     near_image_edge = torch.isclose(boxes, orig_box_torch[None, :], atol=atol, rtol=0)
     near_crop_edge = torch.logical_and(near_crop_edge, ~near_image_edge)
-    return torch.any(near_crop_edge, dim=1)
+    if ignore_image_edge:
+        return torch.any(near_crop_edge, dim=1)
+    return torch.logical_or(
+        torch.any(near_crop_edge, dim=1),
+        torch.all(near_image_edge, dim=1),
+    )
 
 
 def box_xyxy_to_xywh(box_xyxy: torch.Tensor) -> torch.Tensor:
