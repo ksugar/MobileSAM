@@ -10,7 +10,6 @@ from torchvision.ops.boxes import batched_nms, box_area  # type: ignore
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from .modeling import Sam
 from .predictor import SamPredictor
 from .utils.amg import (
     MaskData,
@@ -35,7 +34,7 @@ from .utils.amg import (
 class SamAutomaticMaskGenerator:
     def __init__(
         self,
-        model: Sam,
+        predictor: SamPredictor,
         points_per_side: Optional[int] = 32,
         points_per_batch: int = 64,
         pred_iou_thresh: float = 0.88,
@@ -49,15 +48,17 @@ class SamAutomaticMaskGenerator:
         point_grids: Optional[List[np.ndarray]] = None,
         min_mask_region_area: int = 0,
         output_mode: str = "binary_mask",
+        output_type: str = "Single mask",
+        include_image_edge: bool = True,
     ) -> None:
         """
-        Using a SAM model, generates masks for the entire image.
+        Using a SAM predictor, generates masks for the entire image.
         Generates a grid of point prompts over the image, then filters
         low quality and duplicate masks. The default settings are chosen
         for SAM with a ViT-H backbone.
 
         Arguments:
-          model (Sam): The SAM model to use for mask prediction.
+          predictor: The SAM predictor to use for mask prediction.
           points_per_side (int or None): The number of points to be sampled
             along one side of the image. The total number of points is
             points_per_side**2. If None, 'point_grids' must provide explicit
@@ -93,6 +94,13 @@ class SamAutomaticMaskGenerator:
             'uncompressed_rle', or 'coco_rle'. 'coco_rle' requires pycocotools.
             For large resolutions, 'binary_mask' may consume large amounts of
             memory.
+          output_type (str): If 'Single Mask' is selected, the model will return
+            single masks per prompt. If 'Multi-mask' is selected, the model will
+            return three masks per prompt. 'Multi-mask (all)' keeps all three masks.
+            One of the three masks is kept if the option 'Multi-mask (largest)',
+            'Multi-mask (smallest)', or 'Multi-mask (best quality)' is selected.
+          include_image_edge (bool): If True, include a crop area at the edge of
+            the original image.
         """
 
         assert (points_per_side is None) != (
@@ -120,7 +128,7 @@ class SamAutomaticMaskGenerator:
         if min_mask_region_area > 0:
             import cv2  # type: ignore # noqa: F401
 
-        self.predictor = SamPredictor(model)
+        self.predictor = predictor
         self.points_per_batch = points_per_batch
         self.pred_iou_thresh = pred_iou_thresh
         self.stability_score_thresh = stability_score_thresh
@@ -132,6 +140,8 @@ class SamAutomaticMaskGenerator:
         self.crop_n_points_downscale_factor = crop_n_points_downscale_factor
         self.min_mask_region_area = min_mask_region_area
         self.output_mode = output_mode
+        self.output_type = output_type
+        self.include_image_edge = include_image_edge
 
     @torch.no_grad()
     def generate(self, image: np.ndarray) -> List[Dict[str, Any]]:
@@ -233,7 +243,12 @@ class SamAutomaticMaskGenerator:
         x0, y0, x1, y1 = crop_box
         cropped_im = image[y0:y1, x0:x1, :]
         cropped_im_size = cropped_im.shape[:2]
-        self.predictor.set_image(cropped_im)
+        if (
+            not self.predictor.is_image_set
+            or self.predictor.original_size != orig_size
+            or 0 < crop_layer_idx
+        ):
+            self.predictor.set_image(cropped_im)
 
         # Get points for this crop
         points_scale = np.array(cropped_im_size)[None, ::-1]
@@ -242,19 +257,31 @@ class SamAutomaticMaskGenerator:
         # Generate masks for this crop in batches
         data = MaskData()
         for (points,) in batch_iterator(self.points_per_batch, points_for_image):
-            batch_data = self._process_batch(points, cropped_im_size, crop_box, orig_size)
+            batch_data = self._process_batch(
+                points, cropped_im_size, crop_box, orig_size
+            )
             data.cat(batch_data)
             del batch_data
-        self.predictor.reset_image()
+        if 0 < crop_layer_idx:
+            self.predictor.reset_image()
 
-        # Remove duplicates within this crop.
-        keep_by_nms = batched_nms(
-            data["boxes"].float(),
-            data["iou_preds"],
-            torch.zeros_like(data["boxes"][:, 0]),  # categories
-            iou_threshold=self.box_nms_thresh,
-        )
-        data.filter(keep_by_nms)
+        if self.output_type != "Multi-mask (all)":
+            # Remove duplicates within this crop.
+            if self.output_type == "Multi-mask (largest)":
+                scores = torch.tensor([area_from_rle(rle) for rle in data["rles"]])
+            elif self.output_type in ("Multi-mask (smallest)", "Single mask"):
+                scores = torch.tensor([-area_from_rle(rle) for rle in data["rles"]])
+            elif self.output_type == "Multi-mask (best quality)":
+                scores = data["iou_preds"]
+            else:
+                raise NotImplementedError()
+            keep_by_nms = batched_nms(
+                data["boxes"].float(),
+                scores.to(data["boxes"].device),
+                torch.zeros_like(data["boxes"][:, 0]),  # categories
+                iou_threshold=self.box_nms_thresh,
+            )
+            data.filter(keep_by_nms)
 
         # Return to the original image frame
         data["boxes"] = uncrop_boxes_xyxy(data["boxes"], crop_box)
@@ -275,11 +302,13 @@ class SamAutomaticMaskGenerator:
         # Run model on this batch
         transformed_points = self.predictor.transform.apply_coords(points, im_size)
         in_points = torch.as_tensor(transformed_points, device=self.predictor.device)
-        in_labels = torch.ones(in_points.shape[0], dtype=torch.int, device=in_points.device)
+        in_labels = torch.ones(
+            in_points.shape[0], dtype=torch.int, device=in_points.device
+        )
         masks, iou_preds, _ = self.predictor.predict_torch(
             in_points[:, None, :],
             in_labels[:, None],
-            multimask_output=True,
+            multimask_output=self.output_type != "Single mask",
             return_logits=True,
         )
 
@@ -309,7 +338,12 @@ class SamAutomaticMaskGenerator:
         data["boxes"] = batched_mask_to_box(data["masks"])
 
         # Filter boxes that touch crop boundaries
-        keep_mask = ~is_box_near_crop_edge(data["boxes"], crop_box, [0, 0, orig_w, orig_h])
+        keep_mask = ~is_box_near_crop_edge(
+            data["boxes"],
+            crop_box,
+            [0, 0, orig_w, orig_h],
+            ignore_image_edge=self.include_image_edge,
+        )
         if not torch.all(keep_mask):
             data.filter(keep_mask)
 
