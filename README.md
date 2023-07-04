@@ -12,7 +12,8 @@
 :pushpin: **A demo of MobileSAM** running on **CPU in your own browser** is open at [demo link](https://mobilesam.glitch.me/). This demo is made by [MobileSAM-in-the-Browser](https://github.com/akbartus/MobileSAM-in-the-Browser). Note that this is an unofficial version and stayed tuned for an official version with more features!
 
 :grapes: Media coverage and Projects that adapt from SAM to MobileSAM (Daily update. Thank you all!)
-
+* **2023/07/02**: [Inpaint-Anything](https://github.com/qiaoyu1002/Inpaint-Anything) supports MobileSAM for faster and lightweight Inpaint Anything
+* **2023/07/02**: [Personalize-SAM](https://github.com/qiaoyu1002/Personalize-SAM) supports MobileSAM for faster and lightweight Personalize Segment Anything with 1 Shot
 * **2023/07/01**: [MobileSAM-in-the-Browser](https://github.com/akbartus/MobileSAM-in-the-Browser) makes an example implementation of MobileSAM in the browser.
 * **2023/06/30**: [SegmentAnythingin3D](https://github.com/Jumpat/SegmentAnythingin3D) supports MobileSAM to segment anything in 3D efficiently.
 * **2023/06/30**: MobileSAM has been featured by [AK](https://twitter.com/_akhaliq?lang=en) for the second time, see the link [AK's MobileSAM tweet](https://twitter.com/_akhaliq/status/1674410573075718145). Welcome to retweet.
@@ -35,21 +36,21 @@
 
     Image Encoder                                      | Original SAM | MobileSAM 
     :-----------------------------------------:|:---------|:-----:
-    Paramters      |  611M   | 5M
+    Parameters      |  611M   | 5M
     Speed      |  452ms  | 8ms
 
 * Original SAM and MobileSAM have exactly the same prompt-guided mask decoder: 
 
     Mask Decoder                                      | Original SAM | MobileSAM 
     :-----------------------------------------:|:---------|:-----:
-    Paramters      |  3.876M   | 3.876M
+    Parameters      |  3.876M   | 3.876M
     Speed      |  4ms  | 4ms
 
 * The comparison of the whole pipeline is summarized as follows:
 
     Whole Pipeline (Enc+Dec)                                      | Original SAM | MobileSAM 
     :-----------------------------------------:|:---------|:-----:
-    Paramters      |  615M   | 9.66M
+    Parameters      |  615M   | 9.66M
     Speed      |  456ms  | 12ms
 
 :star: **Original SAM and MobileSAM with a point as the prompt.**  
@@ -68,7 +69,7 @@ MobileSAM is around 7 times smaller and around 5 times faster than the concurren
 The comparison of the whole pipeline is summarzed as follows: 
 Whole Pipeline (Enc+Dec)                                      | FastSAM | MobileSAM 
 :-----------------------------------------:|:---------|:-----:
-Paramters      |  68M   | 9.66M
+Parameters      |  68M   | 9.66M
 Speed      |  64ms  |12ms
 
 :muscle: **Does MobileSAM aign better with the original SAM than FastSAM? Yes!** 
@@ -105,6 +106,16 @@ git clone git@github.com:ChaoningZhang/MobileSAM.git
 cd MobileSAM; pip install -e .
 ```
 
+## Demo
+
+Once installed MobileSAM, you can run demo on your local PC or check out our [HuggingFace Demo](https://huggingface.co/spaces/dhkim2810/MobileSAM).
+
+It requires latest version of [gradio](https://gradio.app).
+
+```
+cd app
+python app.py
+```
 
 ## <a name="GettingStarted"></a>Getting Started
 The MobileSAM can be loaded in the following ways:
@@ -135,7 +146,7 @@ mask_generator = SamAutomaticMaskGenerator(mobile_sam)
 masks = mask_generator.generate(<your_image>)
 ```
 
-### ONNX Export
+## ONNX Export
 **MobileSAM** now supports ONNX export. Export the model with
 
 ```
