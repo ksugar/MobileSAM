@@ -277,7 +277,7 @@ class SamAutomaticMaskGenerator:
                 raise NotImplementedError()
             keep_by_nms = batched_nms(
                 data["boxes"].float(),
-                scores.to(data["boxes"].device),
+                scores.to(data["boxes"].device).float(),
                 torch.zeros_like(data["boxes"][:, 0]),  # categories
                 iou_threshold=self.box_nms_thresh,
             )
